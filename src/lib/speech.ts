@@ -40,8 +40,8 @@ declare global {
   }
 }
 
-// Single shared <audio> element for sequential TTS playback.
 let audioEl: HTMLAudioElement | null = null;
+
 function getAudio(): HTMLAudioElement {
   if (typeof window === "undefined") throw new Error("no window");
   if (!audioEl) {
@@ -51,6 +51,10 @@ function getAudio(): HTMLAudioElement {
   return audioEl;
 }
 
+/**
+ * Fetches TTS audio from /api/tts and plays it.
+ * Resolves when playback has fully ENDED (or errored out).
+ */
 export async function playTTS(text: string): Promise<void> {
   if (!text.trim()) return;
   const res = await fetch("/api/tts", {
@@ -58,12 +62,36 @@ export async function playTTS(text: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
-  if (!res.ok) throw new Error("tts failed");
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`tts failed: ${res.status} ${body}`);
+  }
   const data = (await res.json()) as { audioUrl?: string };
   if (!data.audioUrl) throw new Error("no audio url");
+
   const a = getAudio();
   a.src = data.audioUrl;
-  await a.play();
+
+  return new Promise<void>((resolve) => {
+    const cleanup = () => {
+      a.removeEventListener("ended", onEnd);
+      a.removeEventListener("error", onErr);
+    };
+    const onEnd = () => {
+      cleanup();
+      resolve();
+    };
+    const onErr = () => {
+      cleanup();
+      resolve();
+    };
+    a.addEventListener("ended", onEnd);
+    a.addEventListener("error", onErr);
+    a.play().catch(() => {
+      cleanup();
+      resolve();
+    });
+  });
 }
 
 export function stopTTS() {

@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Download, Loader2, QrCode, Volume2 } from "lucide-react";
+import { ArrowLeft, Bot, Download, Loader2, QrCode, Volume2 } from "lucide-react";
 import { Composer } from "./composer";
 import type { Message } from "@/lib/types";
 import { extractUrl, deriveSpec } from "@/lib/conversation";
 import { playTTS, stopTTS } from "@/lib/speech";
 
-export function Chat() {
+export function Chat({ onExit }: { onExit?: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
@@ -155,6 +155,20 @@ export function Chat() {
 
   return (
     <div className="h-full flex flex-col bg-background">
+      {onExit && (
+        <div className="h-12 border-b border-border flex items-center px-4 shrink-0">
+          <button
+            onClick={() => {
+              stopTTS();
+              onExit();
+            }}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft size={16} />
+            Cambia modalità
+          </button>
+        </div>
+      )}
       <div ref={scrollerRef} className="flex-1 overflow-y-auto scrollbar-thin">
         <div className="max-w-2xl mx-auto px-6 py-10 flex flex-col gap-6">
           {empty && (
