@@ -84,31 +84,18 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
   }
 
   async function startListening() {
+    console.log("[voice] startListening", { supported: supportedRef.current });
     if (!supportedRef.current) {
       setStatus("denied");
       return;
     }
-    // Request microphone explicitly first so we can show a clear error.
-    setStatus("permission");
     setErrorMsg(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // We don't actually use the stream — SpeechRecognition opens its own.
-      // Stop tracks immediately so we don't keep the indicator on.
-      stream.getTracks().forEach((t) => t.stop());
-    } catch (e) {
-      console.error("[mic] permission denied:", e);
-      setStatus("denied");
-      setErrorMsg(
-        "Permesso microfono negato. Clicca l'icona accanto all'URL → Impostazioni sito → Microfono → Consenti.",
-      );
-      return;
-    }
 
     // Fresh recognition each session so it picks up new permission state cleanly.
     const r = getRecognition();
     if (!r) {
       setStatus("denied");
+      setErrorMsg("Browser non supporta il riconoscimento vocale.");
       return;
     }
     recRef.current = r;
@@ -116,6 +103,10 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
     baseRef.current = "";
     setTranscript("");
 
+    r.onstart = () => {
+      console.log("[voice] recognition started");
+      setStatus("listening");
+    };
     r.onresult = (e) => {
       let interim = "";
       let final = "";
@@ -125,43 +116,52 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
         else interim += t;
       }
       const next = (baseRef.current + " " + final + interim).trim();
+      console.log("[voice] result:", { final, interim, base: baseRef.current });
       setTranscript(next);
       if (final) {
         baseRef.current = (baseRef.current + " " + final).trim();
         scheduleSubmit();
       } else if (interim) {
-        // Keep pushing the deadline as long as the user is still talking.
         scheduleSubmit();
       }
     };
     r.onerror = (ev) => {
-      console.error("[stt] error:", ev.error);
+      console.error("[voice] error:", ev.error, ev);
       if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
         setStatus("denied");
-        setErrorMsg("Permesso microfono negato dal browser.");
+        setErrorMsg(
+          "Microfono bloccato. Clicca il lucchetto vicino all'URL → Microfono → Consenti, poi ricarica.",
+        );
       } else if (ev.error === "no-speech") {
-        // ignore; just keep idling
+        // ignore — restart on end handler
+      } else if (ev.error === "audio-capture") {
+        setStatus("error");
+        setErrorMsg(
+          "Nessun microfono disponibile. Su macOS: System Settings → Sound → Input → seleziona un mic.",
+        );
       } else {
         setStatus("error");
         setErrorMsg(`Errore voce: ${ev.error}`);
       }
     };
     r.onend = () => {
-      // If we stop mid-listen because user manually stopped or browser timed out,
-      // and we have transcript pending submit, submit now.
-      if (status === "listening" && baseRef.current.trim()) {
+      console.log("[voice] recognition ended", {
+        statusAtEnd: status,
+        baseText: baseRef.current,
+      });
+      if (baseRef.current.trim()) {
         clearSilenceTimer();
         submitTranscript();
       }
     };
 
+    setStatus("permission");
     try {
       r.start();
-      setStatus("listening");
     } catch (e) {
-      console.error("[stt] start failed:", e);
+      console.error("[voice] start threw:", e);
       setStatus("error");
-      setErrorMsg("Impossibile avviare il microfono. Riprova.");
+      setErrorMsg("Impossibile avviare il microfono. Ricarica la pagina.");
     }
   }
 
@@ -227,8 +227,17 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
           styleHint: spec.styleHint,
         }),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: { imageUrl?: string; fallback?: boolean; error?: string } = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          res.ok ? "Risposta non JSON" : `Server error ${res.status}`,
+        );
+      }
       if (!res.ok) throw new Error(data?.error || "Generation failed");
+      if (!data.imageUrl) throw new Error("Nessuna immagine restituita");
       const finalMsg: Message = {
         ...pending,
         text: `Ecco il tuo QR per ${spec.redirectUrl}. Lo vedi sullo schermo, puoi scaricarlo.`,

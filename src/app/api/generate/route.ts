@@ -39,6 +39,26 @@ function dataUriToBlob(dataUri: string): { blob: Blob; ext: string } | null {
   };
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => {
+      console.warn(`[fal] timed out after ${ms}ms`);
+      resolve(null);
+    }, ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        console.error("[fal] rejected:", e);
+        resolve(null);
+      },
+    );
+  });
+}
+
 async function generateBackground(
   prompt: string,
   referenceImage: string | null,
@@ -62,36 +82,44 @@ async function generateBackground(
       }
     }
 
+    const TIMEOUT = 45_000;
+
     if (referenceUrl) {
-      const result = await fal.subscribe("openai/gpt-image-2/edit", {
-        input: {
-          prompt,
-          image_urls: [referenceUrl],
-          image_size: "square_hd",
-          quality: "high",
-          num_images: 1,
-          output_format: "png",
-        },
-        logs: false,
-      });
+      const result = await withTimeout(
+        fal.subscribe("openai/gpt-image-2/edit", {
+          input: {
+            prompt,
+            image_urls: [referenceUrl],
+            image_size: "square_hd",
+            quality: "medium",
+            num_images: 1,
+            output_format: "png",
+          },
+          logs: false,
+        }),
+        TIMEOUT,
+      );
       return (
-        (result as { data?: { images?: { url?: string }[] } })?.data
+        (result as { data?: { images?: { url?: string }[] } } | null)?.data
           ?.images?.[0]?.url ?? null
       );
     }
 
-    const result = await fal.subscribe("openai/gpt-image-2", {
-      input: {
-        prompt,
-        image_size: "square_hd",
-        quality: "high",
-        num_images: 1,
-        output_format: "png",
-      },
-      logs: false,
-    });
+    const result = await withTimeout(
+      fal.subscribe("openai/gpt-image-2", {
+        input: {
+          prompt,
+          image_size: "square_hd",
+          quality: "medium",
+          num_images: 1,
+          output_format: "png",
+        },
+        logs: false,
+      }),
+      TIMEOUT,
+    );
     return (
-      (result as { data?: { images?: { url?: string }[] } })?.data
+      (result as { data?: { images?: { url?: string }[] } } | null)?.data
         ?.images?.[0]?.url ?? null
     );
   } catch (err) {
@@ -146,39 +174,48 @@ function escapeAttr(s: string) {
 }
 
 export async function POST(req: Request) {
-  let body: Body;
   try {
-    body = (await req.json()) as Body;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  const redirectUrl = body.redirectUrl?.trim();
-  const styleHint = body.styleHint?.trim() || "modern minimal premium design";
-  if (!redirectUrl) {
+    let body: Body;
+    try {
+      body = (await req.json()) as Body;
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    }
+    const redirectUrl = body.redirectUrl?.trim();
+    const styleHint = body.styleHint?.trim() || "modern minimal premium design";
+    if (!redirectUrl) {
+      return NextResponse.json(
+        { error: "redirectUrl required" },
+        { status: 400 },
+      );
+    }
+    try {
+      new URL(redirectUrl);
+    } catch {
+      return NextResponse.json(
+        { error: "redirectUrl is not a valid URL" },
+        { status: 400 },
+      );
+    }
+
+    const prompt = buildPrompt(styleHint, Boolean(body.referenceImage));
+    const bg = await generateBackground(prompt, body.referenceImage ?? null);
+    const svg = await composeQR(redirectUrl, bg);
+
+    const dataUri =
+      "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
+    return NextResponse.json({
+      imageUrl: dataUri,
+      fallback: !bg,
+      bgUrl: bg ?? null,
+    });
+  } catch (err) {
+    console.error("[generate] fatal:", err);
     return NextResponse.json(
-      { error: "redirectUrl required" },
-      { status: 400 },
+      {
+        error: err instanceof Error ? err.message : "Errore interno",
+      },
+      { status: 500 },
     );
   }
-  try {
-    new URL(redirectUrl);
-  } catch {
-    return NextResponse.json(
-      { error: "redirectUrl is not a valid URL" },
-      { status: 400 },
-    );
-  }
-
-  const prompt = buildPrompt(styleHint, Boolean(body.referenceImage));
-  const bg = await generateBackground(prompt, body.referenceImage ?? null);
-  const svg = await composeQR(redirectUrl, bg);
-
-  // Always return as data URI — browser-local, zero storage required.
-  const dataUri =
-    "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
-  return NextResponse.json({
-    imageUrl: dataUri,
-    fallback: !bg,
-    bgUrl: bg ?? null,
-  });
 }

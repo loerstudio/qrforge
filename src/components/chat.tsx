@@ -74,12 +74,27 @@ export function Chat({ onExit }: { onExit?: () => void }) {
             referenceImage: reference ?? null,
           }),
         });
-        const data = await res.json();
+        const text = await res.text();
+        let data: {
+          imageUrl?: string;
+          fallback?: boolean;
+          error?: string;
+        } = {};
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(
+            res.ok
+              ? "Risposta non JSON dal server"
+              : `Server error ${res.status}`,
+          );
+        }
         if (!res.ok) throw new Error(data?.error || "Generation failed");
+        if (!data.imageUrl) throw new Error("Nessuna immagine restituita");
         handlers.patch(pendingId, {
           text: `Ecco il tuo QR per ${spec.redirectUrl}. ${
             data.fallback
-              ? "(rendering QR locale)"
+              ? "(rendering QR locale — backdrop AI non disponibile)"
               : "(rendering AI gpt-image-2)"
           }`,
           imageUrl: data.imageUrl,
@@ -88,7 +103,7 @@ export function Chat({ onExit }: { onExit?: () => void }) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Errore generazione";
         handlers.patch(pendingId, {
-          text: `Ho avuto un problema: ${msg}. Riprova o cambia descrizione.`,
+          text: `Ho avuto un problema generando il backdrop AI, ma il QR funziona comunque. Dettagli: ${msg}. Riprova o semplifica la descrizione.`,
           pending: false,
         });
       } finally {
