@@ -1,5 +1,5 @@
-import { ModeRouter } from "@/components/mode-router";
+import { VoiceMode } from "@/components/voice-mode";
 
 export default function Home() {
-  return <ModeRouter />;
+  return <VoiceMode />;
 }

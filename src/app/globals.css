@@ -62,3 +62,32 @@ button { cursor: pointer; }
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
+
+/* Apple/Siri-style fluid orb */
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+@keyframes spin-reverse { to { transform: rotate(-360deg); } }
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes floaty {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-6px) scale(1.02); }
+}
+.orb-shell { animation: breathe 4.5s ease-in-out infinite; }
+.orb-conic-a { animation: spin-slow 14s linear infinite; }
+.orb-conic-b { animation: spin-reverse 22s linear infinite; }
+.orb-floaty { animation: floaty 6s ease-in-out infinite; }
+
+/* Apple-style ambient bg gradient */
+.apple-bg::before {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  background:
+    radial-gradient(60% 40% at 30% 20%, rgba(99,102,241,0.18), transparent 70%),
+    radial-gradient(50% 35% at 80% 60%, rgba(236,72,153,0.14), transparent 70%),
+    radial-gradient(45% 35% at 50% 90%, rgba(34,211,238,0.14), transparent 70%);
+  filter: blur(40px);
+  pointer-events: none;
+}

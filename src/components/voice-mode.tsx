@@ -1,16 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  Download,
-  Loader2,
-  Mic,
-  MicOff,
-  Square,
-  Volume2,
-  X,
-} from "lucide-react";
+import { Download, Loader2, RotateCcw, X } from "lucide-react";
 import { getRecognition, playTTS, stopTTS } from "@/lib/speech";
 import { deriveSpec, extractUrl } from "@/lib/conversation";
 import type { Message } from "@/lib/types";
@@ -26,7 +17,7 @@ type Status =
 
 const SILENCE_MS = 1500;
 
-export function VoiceMode({ onExit }: { onExit: () => void }) {
+export function VoiceMode() {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [transcript, setTranscript] = useState("");
@@ -47,7 +38,7 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
       supportedRef.current = false;
       setStatus("denied");
       setErrorMsg(
-        "Il tuo browser non supporta il riconoscimento vocale. Usa Chrome o Edge su desktop.",
+        "Browser non supportato. Apri questo sito su Chrome o Safari desktop.",
       );
       return;
     }
@@ -107,7 +98,7 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
         } catch {}
         setStatus("denied");
         setErrorMsg(
-          "Chrome non ha risposto. Probabilmente il permesso microfono è bloccato — clicca il lucchetto vicino all'URL → Microfono → Consenti, poi ricarica.",
+          "Microfono bloccato. Clicca 🔒 vicino all'URL → Microfono → Consenti, poi ricarica.",
         );
       }
     }, 2500);
@@ -132,12 +123,10 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
     r.onerror = (ev) => {
       if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
         setStatus("denied");
-        setErrorMsg("Permesso microfono bloccato dal browser.");
+        setErrorMsg("Microfono bloccato dal browser.");
       } else if (ev.error === "audio-capture") {
         setStatus("error");
-        setErrorMsg(
-          "Nessun microfono disponibile. macOS → Impostazioni → Suono → Input.",
-        );
+        setErrorMsg("Nessun microfono disponibile.");
       } else if (ev.error !== "no-speech") {
         setStatus("error");
         setErrorMsg(`Errore: ${ev.error}`);
@@ -192,8 +181,8 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
         role: "assistant",
         text:
           wasAskingForLink && !newUrl
-            ? "Non ho capito il link. Dimmelo lettera per lettera, oppure scrivilo: ad esempio salute di ferro punto com."
-            : "Per generare il QR dimmi il link di destinazione. Ad esempio salute di ferro punto com.",
+            ? "Non ho capito. Ripeti solo il sito, ad esempio: salute di ferro punto com."
+            : "Dimmi il sito a cui deve puntare il QR. Per esempio: salute di ferro punto com.",
         needsLink: true,
       };
       setMessages([...nextMessages, reply]);
@@ -202,10 +191,11 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
     }
 
     const pendingId = crypto.randomUUID();
+    const host = new URL(spec.redirectUrl).hostname;
     const pending: Message = {
       id: pendingId,
       role: "assistant",
-      text: `Ho capito ${spec.redirectUrl}. Sto generando…`,
+      text: `Genero il QR per ${host}.`,
       pending: true,
       spec: { redirectUrl: spec.redirectUrl, styleHint: spec.styleHint },
     };
@@ -237,7 +227,7 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
       if (!data.imageUrl) throw new Error("Nessuna immagine restituita");
       const finalMsg: Message = {
         ...pending,
-        text: `Ecco fatto. QR pronto per ${spec.redirectUrl}.`,
+        text: `Pronto. Il tuo QR per ${host} è sullo schermo.`,
         imageUrl: data.imageUrl,
         pending: false,
       };
@@ -261,87 +251,110 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
     try {
       await playTTS(text);
     } catch {}
-    setTimeout(() => startListening(), 300);
+    setTimeout(() => startListening(), 250);
   }
 
-  function manualStop() {
+  function reset() {
     stopListening();
     stopTTS();
+    setMessages([]);
+    setLatestImage(null);
+    setTranscript("");
+    setErrorMsg(null);
     setStatus("idle");
   }
 
+  const subtitle =
+    status === "idle"
+      ? "Tocca per iniziare"
+      : status === "permission"
+        ? "Attivazione microfono…"
+        : status === "listening"
+          ? "Ti ascolto"
+          : status === "thinking"
+            ? "Sto creando…"
+            : status === "speaking"
+              ? "Sto parlando"
+              : status === "denied"
+                ? "Microfono bloccato"
+                : "Qualcosa è andato storto";
+
   return (
-    <div className="h-full relative overflow-hidden bg-[#0a0a0f] text-white">
-      {/* Background gradient + grain */}
-      <div className="absolute inset-0 opacity-90 pointer-events-none">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(99,102,241,0.18),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_80%,rgba(236,72,153,0.12),transparent_55%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_75%,rgba(34,197,94,0.10),transparent_55%)]" />
-      </div>
-
-      {/* Top bar */}
-      <div className="relative z-10 h-14 flex items-center px-5">
-        <button
-          onClick={() => {
-            stopListening();
-            stopTTS();
-            onExit();
-          }}
-          className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition-colors"
-        >
-          <ArrowLeft size={16} />
-          Esci
-        </button>
-        <div className="mx-auto flex items-center gap-2 text-xs text-white/60">
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              status === "listening"
-                ? "bg-blue-400 animate-pulse"
-                : status === "speaking"
-                  ? "bg-emerald-400 animate-pulse"
-                  : status === "thinking"
-                    ? "bg-amber-400 animate-pulse"
-                    : "bg-white/30"
-            }`}
-          />
-          QRForge Voice
+    <div className="h-full relative overflow-hidden bg-black text-white apple-bg">
+      {/* Top bar — minimal Apple-style */}
+      <div className="relative z-10 h-16 flex items-center px-6">
+        <div className="text-[15px] font-medium tracking-tight">QRForge</div>
+        <div className="ml-auto flex items-center gap-1">
+          {messages.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowTranscript(true)}
+                className="px-3 h-8 rounded-full text-xs text-white/60 hover:text-white hover:bg-white/5 transition-all"
+              >
+                Conversazione
+              </button>
+              <button
+                onClick={reset}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/5 transition-all"
+                aria-label="Ricomincia"
+                title="Ricomincia"
+              >
+                <RotateCcw size={15} />
+              </button>
+            </>
+          )}
         </div>
-        <button
-          onClick={() => setShowTranscript((v) => !v)}
-          className="text-xs text-white/60 hover:text-white transition-colors"
-        >
-          {messages.length > 0 ? `${messages.length} msg` : ""}
-        </button>
       </div>
 
-      {/* Center stage */}
-      <div className="relative z-10 flex flex-col items-center justify-center px-6 h-[calc(100%-3.5rem)]">
-        <Orb status={status} onStart={startListening} onStop={manualStop} />
-        <Caption status={status} transcript={transcript} error={errorMsg} />
+      {/* Stage */}
+      <div className="relative z-10 flex flex-col items-center justify-center px-6 h-[calc(100%-4rem)]">
+        {/* Hero copy when nothing has been generated yet */}
+        {!latestImage && status === "idle" && (
+          <h1 className="text-[44px] sm:text-[56px] font-light tracking-[-0.02em] leading-none text-center mb-12">
+            <span className="bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent">
+              QR. Parla.
+            </span>
+          </h1>
+        )}
 
-        {/* QR card floating */}
+        <Orb
+          status={status}
+          onStart={startListening}
+          onStop={stopListening}
+        />
+
+        <Caption
+          status={status}
+          subtitle={subtitle}
+          transcript={transcript}
+          error={errorMsg}
+        />
+
+        {/* QR card */}
         {latestImage?.imageUrl && (
-          <div className="mt-10 group">
-            <div className="rounded-3xl bg-white/8 backdrop-blur-xl border border-white/15 p-4 shadow-2xl">
+          <div className="mt-10 orb-floaty">
+            <div className="rounded-[28px] bg-white/[0.06] backdrop-blur-2xl border border-white/10 p-4 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={latestImage.imageUrl}
-                alt="Generated QR"
+                alt="QR"
                 className="w-72 h-72 object-contain rounded-2xl"
               />
-              <div className="mt-3 flex items-center justify-between gap-2">
+              <div className="mt-3 flex items-center justify-between gap-3">
                 <a
                   href={latestImage.imageUrl}
                   target="_blank"
                   rel="noreferrer"
                   download={`qrforge-${Date.now()}.svg`}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-black text-xs font-medium hover:bg-white/90 transition-colors"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white text-black text-[13px] font-medium hover:bg-white/90 transition-colors"
                 >
-                  <Download size={12} />
+                  <Download size={13} />
                   Scarica
                 </a>
-                <span className="text-[11px] text-white/50 truncate max-w-[150px]">
-                  {latestImage.spec?.redirectUrl}
+                <span className="text-[12px] text-white/40 truncate max-w-[160px] font-mono">
+                  {latestImage.spec?.redirectUrl
+                    ? new URL(latestImage.spec.redirectUrl).hostname
+                    : ""}
                 </span>
               </div>
             </div>
@@ -349,36 +362,45 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
         )}
       </div>
 
-      {/* Transcript drawer */}
-      {showTranscript && messages.length > 0 && (
-        <div className="absolute inset-x-0 bottom-0 z-20 max-h-[60vh] overflow-y-auto scrollbar-thin bg-[#0a0a0f]/95 backdrop-blur-xl border-t border-white/10 rounded-t-3xl">
-          <div className="sticky top-0 flex items-center justify-between px-5 py-3 border-b border-white/10 bg-[#0a0a0f]/80 backdrop-blur-xl">
-            <span className="text-xs font-medium text-white/70">
-              Conversazione
-            </span>
-            <button
-              onClick={() => setShowTranscript(false)}
-              className="w-6 h-6 rounded-full hover:bg-white/10 flex items-center justify-center"
-            >
-              <X size={14} />
-            </button>
-          </div>
-          <div className="px-5 py-4 flex flex-col gap-2 max-w-xl mx-auto">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`text-sm px-3.5 py-2.5 rounded-2xl max-w-[85%] ${
-                  m.role === "user"
-                    ? "bg-white text-black ml-auto rounded-tr-md"
-                    : "bg-white/10 text-white mr-auto rounded-tl-md flex items-start gap-2"
-                }`}
+      {/* Transcript sheet */}
+      {showTranscript && (
+        <div
+          className="absolute inset-0 z-30 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center"
+          onClick={() => setShowTranscript(false)}
+        >
+          <div
+            className="w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl bg-[#101015] border border-white/10 max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+              <span className="text-sm font-medium">Conversazione</span>
+              <button
+                onClick={() => setShowTranscript(false)}
+                className="w-7 h-7 rounded-full hover:bg-white/10 flex items-center justify-center"
               >
-                {m.pending && (
-                  <Loader2 size={12} className="inline animate-spin mt-1 shrink-0" />
-                )}
-                <span className="flex-1">{m.text}</span>
-              </div>
-            ))}
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4 flex flex-col gap-2">
+              {messages.map((m) => (
+                <div
+                  key={m.id}
+                  className={`text-[14px] leading-snug px-3.5 py-2.5 rounded-2xl max-w-[88%] ${
+                    m.role === "user"
+                      ? "bg-white text-black ml-auto rounded-tr-md"
+                      : "bg-white/10 text-white mr-auto rounded-tl-md"
+                  }`}
+                >
+                  {m.pending && (
+                    <Loader2
+                      size={12}
+                      className="inline animate-spin mr-1.5 -mt-0.5"
+                    />
+                  )}
+                  {m.text}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -395,126 +417,153 @@ function Orb({
   onStart: () => void;
   onStop: () => void;
 }) {
-  const isInteractive = status === "idle" || status === "listening";
-  const onClick = status === "listening" ? onStop : onStart;
+  const onClick =
+    status === "listening"
+      ? onStop
+      : status === "idle" || status === "denied" || status === "error"
+        ? onStart
+        : undefined;
+
+  // Color palette per state
+  const palette =
+    status === "listening"
+      ? ["#60a5fa", "#a855f7", "#22d3ee", "#60a5fa"]
+      : status === "thinking"
+        ? ["#fbbf24", "#fb923c", "#f472b6", "#fbbf24"]
+        : status === "speaking"
+          ? ["#34d399", "#22d3ee", "#a78bfa", "#34d399"]
+          : status === "denied" || status === "error"
+            ? ["#ef4444", "#f87171", "#ef4444", "#ef4444"]
+            : ["#a78bfa", "#60a5fa", "#22d3ee", "#a78bfa"]; // idle
+
+  const conic = `conic-gradient(from 0deg, ${palette[0]}, ${palette[1]}, ${palette[2]}, ${palette[3]})`;
+  const conic2 = `conic-gradient(from 180deg, ${palette[2]}, ${palette[0]}, ${palette[1]}, ${palette[2]})`;
 
   return (
-    <div className="relative">
-      {/* Halo rings (animate when active) */}
-      {(status === "listening" || status === "speaking") && (
-        <>
-          <div
-            className={`absolute inset-0 rounded-full blur-2xl scale-150 opacity-60 ${
-              status === "speaking" ? "bg-emerald-500" : "bg-blue-500"
-            } animate-pulse`}
-          />
-          <div
-            className={`absolute inset-0 rounded-full ${
-              status === "speaking" ? "bg-emerald-500" : "bg-blue-500"
-            } opacity-30 animate-ping`}
-            style={{ animationDuration: "2s" }}
-          />
-        </>
-      )}
-      {status === "thinking" && (
-        <div className="absolute inset-0 rounded-full bg-amber-500 blur-2xl scale-150 opacity-40 animate-pulse" />
-      )}
+    <button
+      onClick={onClick}
+      disabled={!onClick}
+      className="relative w-[240px] h-[240px] sm:w-[280px] sm:h-[280px] rounded-full focus:outline-none group"
+      aria-label="Voice"
+    >
+      {/* Outer halo */}
+      <div
+        className="absolute inset-[-40px] rounded-full blur-3xl opacity-50 orb-shell"
+        style={{ background: conic }}
+      />
+      {/* Conic layer A */}
+      <div
+        className="absolute inset-0 rounded-full opacity-90 orb-conic-a"
+        style={{ background: conic, filter: "blur(8px)" }}
+      />
+      {/* Conic layer B (reverse) */}
+      <div
+        className="absolute inset-3 rounded-full opacity-70 orb-conic-b mix-blend-screen"
+        style={{ background: conic2, filter: "blur(10px)" }}
+      />
+      {/* Glass core */}
+      <div className="absolute inset-6 rounded-full bg-black/40 backdrop-blur-sm border border-white/10" />
+      {/* Center icon */}
+      <div className="absolute inset-0 flex items-center justify-center text-white/90">
+        {status === "thinking" || status === "permission" ? (
+          <Loader2 size={28} strokeWidth={1.5} className="animate-spin" />
+        ) : status === "listening" ? (
+          <SquareDot />
+        ) : status === "speaking" ? (
+          <WaveBars />
+        ) : (
+          <MicDot />
+        )}
+      </div>
+    </button>
+  );
+}
 
-      <button
-        disabled={!isInteractive && status !== "denied" && status !== "error"}
-        onClick={onClick}
-        className={`relative w-44 h-44 sm:w-56 sm:h-56 rounded-full flex items-center justify-center transition-all duration-300 ${
-          status === "idle"
-            ? "bg-gradient-to-br from-white to-white/80 text-black hover:scale-105 shadow-[0_0_60px_-10px_rgba(255,255,255,0.5)]"
-            : status === "listening"
-              ? "bg-gradient-to-br from-blue-400 to-indigo-600 text-white shadow-[0_0_80px_-5px_rgba(59,130,246,0.7)]"
-              : status === "thinking"
-                ? "bg-gradient-to-br from-amber-400 to-orange-600 text-white"
-                : status === "speaking"
-                  ? "bg-gradient-to-br from-emerald-400 to-teal-600 text-white shadow-[0_0_80px_-5px_rgba(16,185,129,0.7)]"
-                  : "bg-red-500/20 text-red-300 border border-red-500/40"
-        }`}
-      >
-        {status === "idle" && <Mic size={56} strokeWidth={1.5} />}
-        {status === "listening" && <Square size={40} strokeWidth={1.5} />}
-        {status === "thinking" && (
-          <Loader2 size={56} strokeWidth={1.5} className="animate-spin" />
-        )}
-        {status === "speaking" && <Volume2 size={56} strokeWidth={1.5} />}
-        {(status === "denied" || status === "error") && (
-          <MicOff size={56} strokeWidth={1.5} />
-        )}
-        {status === "permission" && (
-          <Loader2 size={56} strokeWidth={1.5} className="animate-spin" />
-        )}
-      </button>
-    </div>
+function MicDot() {
+  return (
+    <svg width="34" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11v1a7 7 0 0 0 14 0v-1" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+    </svg>
+  );
+}
+
+function SquareDot() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22">
+      <rect x="3" y="3" width="16" height="16" rx="3" fill="currentColor" />
+    </svg>
+  );
+}
+
+function WaveBars() {
+  return (
+    <svg width="44" height="28" viewBox="0 0 44 28" fill="currentColor">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <rect
+          key={i}
+          x={i * 9 + 2}
+          y={4}
+          width="5"
+          height="20"
+          rx="2.5"
+        >
+          <animate
+            attributeName="y"
+            values="8;2;8"
+            dur={`${0.6 + i * 0.12}s`}
+            repeatCount="indefinite"
+          />
+          <animate
+            attributeName="height"
+            values="12;24;12"
+            dur={`${0.6 + i * 0.12}s`}
+            repeatCount="indefinite"
+          />
+        </rect>
+      ))}
+    </svg>
   );
 }
 
 function Caption({
   status,
+  subtitle,
   transcript,
   error,
 }: {
   status: Status;
+  subtitle: string;
   transcript: string;
   error: string | null;
 }) {
   if (status === "denied" || status === "error") {
     return (
       <div className="mt-10 text-center max-w-md">
-        <p className="text-sm font-medium text-red-300">
-          {error ?? "Qualcosa non va col microfono."}
-        </p>
-        <p className="mt-2 text-xs text-white/40">Tocca l&apos;orb per riprovare.</p>
+        <p className="text-[15px] text-red-300/90">{error ?? subtitle}</p>
+        <p className="mt-2 text-xs text-white/30">Tocca l&apos;orb per riprovare.</p>
       </div>
     );
   }
-  if (status === "idle") {
-    return (
-      <div className="mt-10 text-center">
-        <p className="text-2xl sm:text-3xl font-light tracking-tight">
-          Tocca per parlare
-        </p>
-        <p className="mt-2 text-sm text-white/50">
-          Dimmi il link e lo stile, penso a tutto.
-        </p>
-      </div>
-    );
-  }
-  if (status === "permission") {
-    return <p className="mt-10 text-sm text-white/50">Sto attivando il microfono…</p>;
-  }
-  if (status === "listening") {
-    return (
-      <div className="mt-10 text-center max-w-2xl px-4">
-        <p className="text-xs uppercase tracking-widest text-blue-300 mb-3">
-          Ti ascolto
-        </p>
-        {transcript ? (
-          <p className="text-xl sm:text-2xl font-light leading-snug text-white">
-            {transcript}
-          </p>
-        ) : (
-          <p className="text-white/30 text-base">Parla pure…</p>
-        )}
-      </div>
-    );
-  }
-  if (status === "thinking") {
-    return (
-      <p className="mt-10 text-lg text-amber-200 font-light tracking-wide">
-        Sto generando la grafica…
+  return (
+    <div className="mt-10 text-center max-w-2xl px-4 min-h-[3.5rem]">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-white/40 mb-2.5">
+        {subtitle}
       </p>
-    );
-  }
-  if (status === "speaking") {
-    return (
-      <p className="mt-10 text-lg text-emerald-200 font-light tracking-wide">
-        Sto parlando…
-      </p>
-    );
-  }
-  return null;
+      {status === "listening" && transcript && (
+        <p className="text-[20px] sm:text-[22px] font-light leading-snug text-white">
+          {transcript}
+        </p>
+      )}
+      {status === "listening" && !transcript && (
+        <p className="text-white/30 text-[15px]">Parla pure…</p>
+      )}
+      {status === "idle" && (
+        <p className="text-white/40 text-[14px]">
+          Dimmi link e stile. Penso al resto.
+        </p>
+      )}
+    </div>
+  );
 }
