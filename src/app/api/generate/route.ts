@@ -189,13 +189,19 @@ async function composeQR(redirectUrl: string, bgUrl: string) {
     type: "svg",
     errorCorrectionLevel: "H",
     margin: 2,
-    width: 600,
     color: { dark: "#0a0a0a", light: "#ffffff" },
   });
 
   const SIZE = 1024;
   const QR_SIZE = 600;
   const offset = (SIZE - QR_SIZE) / 2;
+
+  // qrcode.js outputs <svg viewBox="0 0 N N"> where N is the module count
+  // (e.g. 33 for short URLs). Preserve the original viewBox when re-wrapping
+  // so the inner <path> coords (in module units) scale to QR_SIZE px.
+  const vbMatch = qrSvg.match(/viewBox="([^"]+)"/);
+  const qrViewBox = vbMatch ? vbMatch[1] : "0 0 33 33";
+
   const innerQR = qrSvg
     .replace(/<\?xml[^?]*\?>/, "")
     .replace(/<svg[^>]*>/, "")
@@ -214,9 +220,7 @@ async function composeQR(redirectUrl: string, bgUrl: string) {
     <rect x="0" y="0" width="${SIZE}" height="${SIZE}" fill="rgba(255,255,255,0.18)"/>
     <rect x="${offset - 24}" y="${offset - 24}" width="${QR_SIZE + 48}" height="${QR_SIZE + 48}" rx="32" fill="rgba(0,0,0,0.18)" filter="url(#soft)"/>
     <rect x="${offset - 20}" y="${offset - 20}" width="${QR_SIZE + 40}" height="${QR_SIZE + 40}" rx="28" fill="#ffffff"/>
-    <g transform="translate(${offset}, ${offset})">
-      <svg width="${QR_SIZE}" height="${QR_SIZE}" viewBox="0 0 ${QR_SIZE} ${QR_SIZE}" xmlns="http://www.w3.org/2000/svg">${innerQR}</svg>
-    </g>
+    <svg x="${offset}" y="${offset}" width="${QR_SIZE}" height="${QR_SIZE}" viewBox="${qrViewBox}" xmlns="http://www.w3.org/2000/svg">${innerQR}</svg>
   </g>
 </svg>`;
 }

@@ -103,10 +103,26 @@ export function VoiceMode({ onExit }: { onExit: () => void }) {
     baseRef.current = "";
     setTranscript("");
 
+    let started = false;
     r.onstart = () => {
+      started = true;
       console.log("[voice] recognition started");
       setStatus("listening");
     };
+    // If Chrome doesn't fire onstart within 2.5s, the permission is almost
+    // certainly silently denied or the mic device is missing.
+    setTimeout(() => {
+      if (!started) {
+        console.warn("[voice] no onstart within 2.5s — likely blocked");
+        try {
+          r.abort();
+        } catch {}
+        setStatus("denied");
+        setErrorMsg(
+          "Chrome non ha risposto. Probabilmente il permesso microfono è bloccato per questo sito: clicca l'icona 🔒 accanto all'URL, vai su 'Microfono' → 'Consenti', poi ricarica la pagina.",
+        );
+      }
+    }, 2500);
     r.onresult = (e) => {
       let interim = "";
       let final = "";
