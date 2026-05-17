@@ -77,7 +77,7 @@ export function Chat({ onExit }: { onExit?: () => void }) {
         const text = await res.text();
         let data: {
           imageUrl?: string;
-          fallback?: boolean;
+          model?: string;
           error?: string;
         } = {};
         try {
@@ -92,18 +92,14 @@ export function Chat({ onExit }: { onExit?: () => void }) {
         if (!res.ok) throw new Error(data?.error || "Generation failed");
         if (!data.imageUrl) throw new Error("Nessuna immagine restituita");
         handlers.patch(pendingId, {
-          text: `Ecco il tuo QR per ${spec.redirectUrl}. ${
-            data.fallback
-              ? "(rendering QR locale — backdrop AI non disponibile)"
-              : "(rendering AI gpt-image-2)"
-          }`,
+          text: `Ecco il tuo QR per ${spec.redirectUrl}. Reso con ${data.model ?? "AI"}.`,
           imageUrl: data.imageUrl,
           pending: false,
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Errore generazione";
         handlers.patch(pendingId, {
-          text: `Ho avuto un problema generando il backdrop AI, ma il QR funziona comunque. Dettagli: ${msg}. Riprova o semplifica la descrizione.`,
+          text: `Non sono riuscito a generare la grafica AI. ${msg}. Tocca riprova o semplifica la descrizione.`,
           pending: false,
         });
       } finally {
