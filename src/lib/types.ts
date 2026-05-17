@@ -5,19 +5,12 @@ export interface QRSpec {
   styleHint: string;
 }
 
-export interface AssistantPayload {
-  text: string;
-  spec?: QRSpec;
-  needsLink?: boolean;
-  imageUrl?: string;
-  pending?: boolean;
-}
-
 export interface Message {
   id: string;
   role: ChatRole;
   text: string;
   imageUrl?: string;
+  attachmentDataUri?: string; // user-uploaded reference image (base64 inline)
   needsLink?: boolean;
   spec?: QRSpec;
   pending?: boolean;

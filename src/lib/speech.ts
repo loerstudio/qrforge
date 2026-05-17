@@ -1,6 +1,5 @@
 "use client";
 
-// Minimal Web Speech API helpers — Chrome/Edge/Safari (webkit prefix).
 type AnyWin = typeof window & {
   webkitSpeechRecognition?: new () => SpeechRecognition;
   SpeechRecognition?: new () => SpeechRecognition;
@@ -18,19 +17,6 @@ export function getRecognition(): SpeechRecognition | null {
   return rec;
 }
 
-export function speak(text: string, lang = "it-IT") {
-  if (typeof window === "undefined") return;
-  try {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang;
-    u.rate = 1.02;
-    u.pitch = 1;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  } catch {}
-}
-
-// Types for the Web Speech API (lib.dom.d.ts only types it partially)
 declare global {
   interface SpeechRecognitionEvent extends Event {
     resultIndex: number;
@@ -51,5 +37,38 @@ declare global {
     start(): void;
     stop(): void;
     abort(): void;
+  }
+}
+
+// Single shared <audio> element for sequential TTS playback.
+let audioEl: HTMLAudioElement | null = null;
+function getAudio(): HTMLAudioElement {
+  if (typeof window === "undefined") throw new Error("no window");
+  if (!audioEl) {
+    audioEl = new Audio();
+    audioEl.preload = "auto";
+  }
+  return audioEl;
+}
+
+export async function playTTS(text: string): Promise<void> {
+  if (!text.trim()) return;
+  const res = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error("tts failed");
+  const data = (await res.json()) as { audioUrl?: string };
+  if (!data.audioUrl) throw new Error("no audio url");
+  const a = getAudio();
+  a.src = data.audioUrl;
+  await a.play();
+}
+
+export function stopTTS() {
+  if (audioEl) {
+    audioEl.pause();
+    audioEl.currentTime = 0;
   }
 }

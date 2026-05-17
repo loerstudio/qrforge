@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { fal } from "@fal-ai/client";
 import QRCode from "qrcode";
-import { put } from "@vercel/blob";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -9,22 +8,78 @@ export const maxDuration = 60;
 interface Body {
   redirectUrl?: string;
   styleHint?: string;
+  referenceImage?: string | null; // data URI from browser FileReader
 }
 
-function buildPrompt(styleHint: string) {
-  return [
+function buildPrompt(styleHint: string, hasRef: boolean) {
+  const base = [
     "A square, high-resolution decorative artwork that serves as a stylish backdrop for a QR code.",
     `Style and theme: ${styleHint}.`,
     "Composition: leave a clean, centered square area with calm contrast suitable for an overlaid QR matrix.",
     "Avoid text, letters, words, numbers, signatures, watermarks, or logos.",
     "Aesthetic: premium, modern, balanced negative space, soft lighting, professional poster look.",
-  ].join(" ");
+  ];
+  if (hasRef) {
+    base.push(
+      "Use the reference image for brand colors, mood, and visual identity. Do NOT reproduce its content literally; translate it into a clean square backdrop.",
+    );
+  }
+  return base.join(" ");
 }
 
-async function generateBackground(prompt: string): Promise<string | null> {
+function dataUriToBlob(dataUri: string): { blob: Blob; ext: string } | null {
+  const m = /^data:([^;]+);base64,(.+)$/.exec(dataUri);
+  if (!m) return null;
+  const mime = m[1];
+  const bytes = Buffer.from(m[2], "base64");
+  const ext = mime.split("/")[1] || "png";
+  return {
+    blob: new Blob([bytes], { type: mime }),
+    ext,
+  };
+}
+
+async function generateBackground(
+  prompt: string,
+  referenceImage: string | null,
+): Promise<string | null> {
   if (!process.env.FAL_KEY) return null;
   try {
     fal.config({ credentials: process.env.FAL_KEY });
+
+    let referenceUrl: string | null = null;
+    if (referenceImage) {
+      const parsed = dataUriToBlob(referenceImage);
+      if (parsed) {
+        try {
+          const file = new File([parsed.blob], `ref.${parsed.ext}`, {
+            type: parsed.blob.type,
+          });
+          referenceUrl = await fal.storage.upload(file);
+        } catch (e) {
+          console.error("[fal] storage upload failed:", e);
+        }
+      }
+    }
+
+    if (referenceUrl) {
+      const result = await fal.subscribe("openai/gpt-image-2/edit", {
+        input: {
+          prompt,
+          image_urls: [referenceUrl],
+          image_size: "square_hd",
+          quality: "high",
+          num_images: 1,
+          output_format: "png",
+        },
+        logs: false,
+      });
+      return (
+        (result as { data?: { images?: { url?: string }[] } })?.data
+          ?.images?.[0]?.url ?? null
+      );
+    }
+
     const result = await fal.subscribe("openai/gpt-image-2", {
       input: {
         prompt,
@@ -35,9 +90,10 @@ async function generateBackground(prompt: string): Promise<string | null> {
       },
       logs: false,
     });
-    const url = (result as { data?: { images?: { url?: string }[] } })?.data
-      ?.images?.[0]?.url;
-    return url ?? null;
+    return (
+      (result as { data?: { images?: { url?: string }[] } })?.data
+        ?.images?.[0]?.url ?? null
+    );
   } catch (err) {
     console.error("[fal] gpt-image-2 failed:", err);
     return null;
@@ -45,8 +101,6 @@ async function generateBackground(prompt: string): Promise<string | null> {
 }
 
 async function composeQR(redirectUrl: string, bgUrl: string | null) {
-  // Always produce a guaranteed-scannable QR; if we have a fal background,
-  // we render the QR on top as a centered overlay (white safe zone behind it).
   const qrSvg = await QRCode.toString(redirectUrl, {
     type: "svg",
     errorCorrectionLevel: "H",
@@ -55,8 +109,6 @@ async function composeQR(redirectUrl: string, bgUrl: string | null) {
     color: { dark: "#0a0a0a", light: "#ffffff" },
   });
 
-  // Wrap in an outer SVG that includes the background image (if any) plus the
-  // QR centered with a white rounded card behind it.
   const SIZE = 1024;
   const QR_SIZE = 600;
   const offset = (SIZE - QR_SIZE) / 2;
@@ -65,7 +117,7 @@ async function composeQR(redirectUrl: string, bgUrl: string | null) {
     .replace(/<svg[^>]*>/, "")
     .replace(/<\/svg>/, "");
 
-  const composed = `<?xml version="1.0" encoding="UTF-8"?>
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${SIZE} ${SIZE}" width="${SIZE}" height="${SIZE}">
   <defs>
     <clipPath id="round"><rect width="${SIZE}" height="${SIZE}" rx="48" ry="48"/></clipPath>
@@ -87,7 +139,6 @@ async function composeQR(redirectUrl: string, bgUrl: string | null) {
     </g>
   </g>
 </svg>`;
-  return composed;
 }
 
 function escapeAttr(s: string) {
@@ -104,37 +155,27 @@ export async function POST(req: Request) {
   const redirectUrl = body.redirectUrl?.trim();
   const styleHint = body.styleHint?.trim() || "modern minimal premium design";
   if (!redirectUrl) {
-    return NextResponse.json({ error: "redirectUrl required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "redirectUrl required" },
+      { status: 400 },
+    );
   }
   try {
     new URL(redirectUrl);
   } catch {
-    return NextResponse.json({ error: "redirectUrl is not a valid URL" }, { status: 400 });
+    return NextResponse.json(
+      { error: "redirectUrl is not a valid URL" },
+      { status: 400 },
+    );
   }
 
-  const prompt = buildPrompt(styleHint);
-  const bg = await generateBackground(prompt);
+  const prompt = buildPrompt(styleHint, Boolean(body.referenceImage));
+  const bg = await generateBackground(prompt, body.referenceImage ?? null);
   const svg = await composeQR(redirectUrl, bg);
 
-  // Try to upload to Vercel Blob; if unavailable in this env, fall back to data URI.
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
-    try {
-      const blob = await put(
-        `qr/${crypto.randomUUID()}.svg`,
-        new Blob([svg], { type: "image/svg+xml" }),
-        { access: "public", addRandomSuffix: false },
-      );
-      return NextResponse.json({
-        imageUrl: blob.url,
-        fallback: !bg,
-        bgUrl: bg ?? null,
-      });
-    } catch (err) {
-      console.error("[blob] put failed:", err);
-    }
-  }
-
-  const dataUri = "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
+  // Always return as data URI — browser-local, zero storage required.
+  const dataUri =
+    "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
   return NextResponse.json({
     imageUrl: dataUri,
     fallback: !bg,

@@ -1,82 +1,56 @@
 # QRForge
 
-> Manus-style AI studio that builds beautiful, scannable QR codes from a chat — with **Voice Mode**.
+> Minimal chat that builds AI-powered, scannable QR codes — with **ElevenLabs voice**.
 
-A pixel-careful Manus clone (thin left sidebar, centered hero, Free plan / credits / Upgrade header, pill quick-actions, large bordered input) re-skinned and repurposed for one job: **AI-powered QR code generation**.
-
-## What it does
-
-1. You describe the QR you want (style, brand, use case) — by typing OR by **voice** (Web Speech API).
-2. The assistant asks for your **redirect URL**.
-3. It calls **fal.ai → `openai/gpt-image-2`** to generate a square branded backdrop, then composes a **guaranteed-scannable QR** (error-correction H) centered on top with a white safe zone.
-4. Result is uploaded to **Vercel Blob** and shown in chat with a one-click download.
-
-If `FAL_KEY` is missing or fal errors, the route still returns a clean, scannable QR (fallback mode).
+A fullscreen chat (no chrome, no sidebar). You type or talk; the assistant asks for the redirect URL and returns a stylized, scannable QR. Drop in a logo or reference image — it's read locally in the browser and steered into the generation.
 
 ## Stack
 
-- **Next.js 16** (App Router, Turbopack, RSC) + **TypeScript**
-- **Tailwind CSS v4**
-- **lucide-react** icons
-- **@fal-ai/client** — `openai/gpt-image-2` (text-to-image)
-- **qrcode** — server-side QR matrix (error-correction H)
-- **@vercel/blob** — image storage
-- **Web Speech API** — Voice Mode (Chrome / Edge / Safari)
+- **Next.js 16** (App Router, Turbopack) + **TypeScript** + **Tailwind v4**
+- **lucide-react**
+- **fal.ai**
+  - `openai/gpt-image-2` — text-to-image backdrop
+  - `openai/gpt-image-2/edit` — image-to-image when a reference is attached
+  - `fal-ai/elevenlabs/tts/turbo-v2.5` — voice for assistant replies
+- **qrcode** — server-side QR matrix (error-correction H, guaranteed scannable)
+- **Web Speech API** — STT in the browser (free, no key)
 
-## Local dev
+## How it works
+
+1. **Chat fullscreen.** Empty state → "Genera il tuo QR" + composer. No sidebar, no header, no plan/credits.
+2. **Voice ON / Voice OFF** toggle in the composer. When ON, every assistant message is auto-spoken via fal → ElevenLabs Turbo v2.5. Each message also has a 🔊 button to replay.
+3. **🎙️ Mic** dictates into the composer (browser `SpeechRecognition`, `it-IT`).
+4. **📎 Paperclip** opens a local file picker. The image is read with `FileReader` as a base64 data URI — **never leaves the browser** until the user clicks send. On generate it's uploaded once to fal storage and used as a reference image for `gpt-image-2/edit`.
+5. The composed QR is returned as a `data:image/svg+xml;base64,…` URI — no storage required.
+
+## Env vars (set on Vercel)
+
+| Name | Required | Notes |
+|---|---|---|
+| `FAL_KEY` | yes (for AI + voice) | If absent: QR still generated locally, no voice |
+
+No DB, no auth, no Blob — demo-ready.
+
+## Run
 
 ```bash
 bun install
-bun run dev
+bun run dev   # http://localhost:3000
 ```
-
-Open http://localhost:3000.
-
-## Env vars
-
-Set these in Vercel:
-
-| Name | Required | What it is |
-|---|---|---|
-| `FAL_KEY` | recommended | fal.ai API key. Without it, generation falls back to a plain styled QR. |
-| `BLOB_READ_WRITE_TOKEN` | recommended | Vercel Blob token. Without it, the SVG is returned as a data URI. |
 
 ## Deploy
 
 ```bash
-vercel link
 vercel --prod
 ```
 
-Push to `main` → Vercel auto-deploys.
+Or push to `main` — Vercel auto-deploys (GitHub linked).
 
-## Voice Mode
+## Cost notes
 
-Click the 🎙️ in the composer. It uses the browser's `SpeechRecognition` (continuous + interim results, `it-IT` by default). The assistant also speaks short confirmations back via `speechSynthesis`.
-
-## Project layout
-
-```
-src/
-  app/
-    api/generate/route.ts   # fal gpt-image-2 → SVG compose → Vercel Blob
-    api/health/route.ts     # env / status probe
-    layout.tsx              # sidebar + header shell
-    page.tsx                # Studio (hero ↔ chat)
-    globals.css             # Manus-style tokens
-  components/
-    sidebar.tsx
-    header.tsx
-    studio.tsx
-    hero.tsx                # "What can I do for you?" + pills
-    composer.tsx            # input + voice + send
-    chat.tsx                # messages, generation flow
-  lib/
-    conversation.ts         # URL extraction + spec derivation
-    speech.ts               # Web Speech wrappers
-    types.ts
-```
+- TTS: ElevenLabs Turbo v2.5 via fal — ~$0.05 / 1,000 chars.
+- Image: fal `openai/gpt-image-2` — pay-per-image.
 
 ## License
 
-MIT — built for an investor pitch demo by Loer Studio.
+MIT — built for an investor pitch by Loer Studio.
